@@ -278,7 +278,6 @@ func (c *Client) SendLoop() error {
 
 		if msg == "/kill" {
 			fmt.Println("Sending server shutdown command...")
-			// Отправляем специальные байты: "KILL" + 4 нулевых байта
 			killBytes := []byte("MSGE\x00\x00\x00\x00")
 			if _, err := c.Conn.Write(killBytes); err != nil {
 				fmt.Printf("Failed to send kill command: %v\n", err)
