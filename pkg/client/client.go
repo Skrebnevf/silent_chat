@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
+	"math/rand"
 	"net"
 	"os"
 	"strings"
@@ -39,17 +41,26 @@ func (c *Client) ReadMessage() (protocol.Message, error) {
 		return protocol.Message{}, fmt.Errorf("failed to read header: %v", err)
 	}
 	size := binary.BigEndian.Uint32(header)
+
+	if c.Config.MaxPacketSize > math.MaxUint32 {
+		return protocol.Message{}, fmt.Errorf(
+			"max packet size exceeds maximum allowed value",
+		)
+	}
 	if size > uint32(c.Config.MaxPacketSize) {
 		return protocol.Message{}, fmt.Errorf("packet too large: %d", size)
 	}
+
 	body := make([]byte, size)
 	if _, err := io.ReadFull(c.Conn, body); err != nil {
 		return protocol.Message{}, fmt.Errorf("failed to read body: %v", err)
 	}
+
 	var msg protocol.Message
 	if err := json.Unmarshal(body, &msg); err != nil {
 		return protocol.Message{}, fmt.Errorf("failed to decode JSON: %v", err)
 	}
+
 	return msg, nil
 }
 
@@ -71,6 +82,21 @@ func (c *Client) WriteMessage(msg protocol.Message) error {
 		return fmt.Errorf("failed to write message: %v", err)
 	}
 	return nil
+}
+
+func (c *Client) SendFakeMessage() error {
+	randInt := rand.Intn(19) + 1
+	randString, err := utils.RandomString(randInt)
+	if err != nil {
+		return fmt.Errorf("failed to generate random string: %v", err)
+	}
+	fmt.Println(randString)
+	fake := protocol.Message{
+		Type: "fake",
+		Text: randString,
+	}
+
+	return c.WriteMessage(fake)
 }
 
 func (c *Client) Connect() error {
@@ -102,6 +128,7 @@ func (c *Client) Connect() error {
 	fmt.Print("\nEnter your username: ")
 	username, _ := c.Reader.ReadString('\n')
 	username = strings.TrimSpace(username)
+
 	c.Username = username
 
 	c.Conn = conn
@@ -260,20 +287,14 @@ func (c *Client) SendLoop() error {
 			return nil
 		}
 
-		// Get sender IP
-		var senderIP string
-		if c.Conn != nil {
-			if localAddr := c.Conn.LocalAddr(); localAddr != nil {
-				senderIP = localAddr.(*net.TCPAddr).IP.String()
-			}
-		}
-
 		msgData := protocol.Message{
 			Type:       "chat",
 			Text:       msg,
 			SenderName: c.Username,
-			SenderIP:   senderIP,
 		}
+
+		delay := time.Duration(rand.Intn(1000)) * time.Millisecond
+		time.Sleep(delay)
 
 		if err := c.WriteMessage(msgData); err != nil {
 			fmt.Printf("Failed to send message: %v\n", err)
@@ -321,6 +342,21 @@ func (c *Client) Run() error {
 		}
 
 		retryCount = 0
+
+		delay := time.Duration(rand.Intn(30)) * time.Second
+
+		go func() {
+			ticker := time.NewTicker(delay)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				if c.Connected {
+					if err := c.SendFakeMessage(); err != nil {
+						log.Printf("send fake message, err: %v", err)
+					}
+				}
+			}
+		}()
 
 		var wg sync.WaitGroup
 
