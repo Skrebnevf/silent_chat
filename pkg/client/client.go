@@ -90,7 +90,6 @@ func (c *Client) SendFakeMessage() error {
 	if err != nil {
 		return fmt.Errorf("failed to generate random string: %v", err)
 	}
-	fmt.Println(randString)
 	fake := protocol.Message{
 		Type: "fake",
 		Text: randString,
