@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"math/rand"
 	"net"
 	"os"
@@ -37,22 +36,30 @@ type Client struct {
 
 func (c *Client) ReadMessage() (protocol.Message, error) {
 	header := make([]byte, 4)
+
 	if _, err := io.ReadFull(c.Conn, header); err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return protocol.Message{}, fmt.Errorf("header read timeout: %v", err)
+		}
 		return protocol.Message{}, fmt.Errorf("failed to read header: %v", err)
 	}
-	size := binary.BigEndian.Uint32(header)
 
-	if c.Config.MaxPacketSize > math.MaxUint32 {
-		return protocol.Message{}, fmt.Errorf(
-			"max packet size exceeds maximum allowed value",
-		)
+	size := binary.BigEndian.Uint32(header)
+	if size == 0 {
+		return protocol.Message{}, fmt.Errorf("packet size is zero")
 	}
-	if size > uint32(c.Config.MaxPacketSize) {
+	if size > c.Config.MaxPacketSize {
 		return protocol.Message{}, fmt.Errorf("packet too large: %d", size)
+	}
+	if size > c.Config.AbsoluteMaxPacketSize {
+		return protocol.Message{}, fmt.Errorf("packet too large or attack detected: %v", size)
 	}
 
 	body := make([]byte, size)
 	if _, err := io.ReadFull(c.Conn, body); err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return protocol.Message{}, fmt.Errorf("body read timeout: %v", err)
+		}
 		return protocol.Message{}, fmt.Errorf("failed to read body: %v", err)
 	}
 
@@ -76,16 +83,21 @@ func (c *Client) WriteMessage(msg protocol.Message) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.Conn.Write(data)
+	n, err := c.Conn.Write(data)
 	if err != nil {
 		c.Connected = false
 		return fmt.Errorf("failed to write message: %v", err)
+	}
+	if n != len(data) {
+		c.Connected = false
+		return fmt.Errorf("incomplete write: wrote %d bytes out of %d",
+			n, len(data))
 	}
 	return nil
 }
 
 func (c *Client) SendFakeMessage() error {
-	randInt := rand.Intn(19) + 1
+	randInt := rand.Intn(39) + 1
 	randString, err := utils.RandomString(randInt)
 	if err != nil {
 		return fmt.Errorf("failed to generate random string: %v", err)
@@ -216,6 +228,7 @@ func (c *Client) Listen() {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				continue
 			}
+
 			if strings.Contains(err.Error(), "EOF") ||
 				strings.Contains(
 					err.Error(),
@@ -223,9 +236,11 @@ func (c *Client) Listen() {
 				) {
 				fmt.Println("\nConnection closed by server")
 				c.Connected = false
+				os.Exit(0)
 				return
 			}
-			fmt.Printf("\nListen error: %v\n", err)
+
+			fmt.Printf("\nNetwork error: %v\n", err)
 			c.Connected = false
 			return
 		}
@@ -291,7 +306,7 @@ func (c *Client) SendLoop() error {
 			SenderName: c.Username,
 		}
 
-		delay := time.Duration(rand.Intn(1000)) * time.Millisecond
+		delay := time.Duration(rand.Intn(300)) * time.Millisecond
 		time.Sleep(delay)
 
 		if err := c.WriteMessage(msgData); err != nil {
@@ -311,7 +326,6 @@ func (c *Client) Run() error {
 			retryCount++
 
 			if strings.Contains(err.Error(), "authentication failed") {
-
 				fmt.Printf(
 					"Authentication failed. Retrying in %v...\n",
 					c.Config.AuthFailDelay,
@@ -331,7 +345,6 @@ func (c *Client) Run() error {
 				)
 				utils.Spinner("Reconnecting", backoffDelay)
 			} else {
-
 				fmt.Printf("Connection failed. Retrying in %v... (attempt %d/%d)\n",
 					c.Config.ReconnectDelay, retryCount, c.Config.MaxRetries)
 				utils.Spinner("Reconnecting", c.Config.ReconnectDelay)
@@ -361,6 +374,7 @@ func (c *Client) Run() error {
 		wg.Go(func() {
 			c.Listen()
 		})
+
 		err = c.SendLoop()
 
 		wg.Wait()
@@ -373,7 +387,7 @@ func (c *Client) Run() error {
 		}
 
 		if err == nil {
-			return nil // Clean exit
+			return nil
 		}
 
 		fmt.Printf("Session ended: %v\n", err)

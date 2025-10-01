@@ -73,7 +73,7 @@ func EncodeMessage(msg Message, config *config.Config) ([]byte, error) {
 	if len(jsonData) > math.MaxUint32 {
 		return nil, fmt.Errorf("message too large: %d bytes", len(jsonData))
 	}
-	if len(jsonData) > config.MaxPacketSize {
+	if uint32(len(jsonData)) > config.MaxPacketSize {
 		return nil, fmt.Errorf("message too large: %d bytes", len(jsonData))
 	}
 	buf := make([]byte, 4+len(jsonData))
