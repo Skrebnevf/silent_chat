@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
@@ -39,7 +40,10 @@ func (c *Client) ReadMessage() (protocol.Message, error) {
 
 	if _, err := io.ReadFull(c.Conn, header); err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return protocol.Message{}, fmt.Errorf("header read timeout: %v", err)
+			return protocol.Message{}, fmt.Errorf(
+				"header read timeout: %v",
+				err,
+			)
 		}
 		return protocol.Message{}, fmt.Errorf("failed to read header: %v", err)
 	}
@@ -52,7 +56,10 @@ func (c *Client) ReadMessage() (protocol.Message, error) {
 		return protocol.Message{}, fmt.Errorf("packet too large: %d", size)
 	}
 	if size > c.Config.AbsoluteMaxPacketSize {
-		return protocol.Message{}, fmt.Errorf("packet too large or attack detected: %v", size)
+		return protocol.Message{}, fmt.Errorf(
+			"packet too large or attack detected: %v",
+			size,
+		)
 	}
 
 	body := make([]byte, size)
@@ -216,12 +223,36 @@ func (c *Client) Listen() {
 			return
 		}
 
-		if setDeadlineErr := c.Conn.SetReadDeadline(time.Now().Add(c.Config.ReadTimeout)); setDeadlineErr != nil {
-			log.Printf("set deadline err: %v", setDeadlineErr)
-		}
-		msg, err := c.ReadMessage()
-		if setDeadlineErr := c.Conn.SetReadDeadline(time.Time{}); setDeadlineErr != nil {
-			log.Printf("set deadline err: %v", setDeadlineErr)
+		var msg protocol.Message
+		var err error
+
+		if c.Config.ReadTimeout > 0 {
+			ctx, cancel := context.WithTimeout(
+				context.Background(),
+				c.Config.ReadTimeout,
+			)
+			defer cancel()
+
+			msgChan := make(chan protocol.Message, 1)
+			errChan := make(chan error, 1)
+
+			go func() {
+				msg, err := c.ReadMessage()
+				if err != nil {
+					errChan <- err
+				} else {
+					msgChan <- msg
+				}
+			}()
+
+			select {
+			case msg = <-msgChan:
+			case err = <-errChan:
+			case <-ctx.Done():
+				err = ctx.Err()
+			}
+		} else {
+			msg, err = c.ReadMessage()
 		}
 
 		if err != nil {
@@ -343,7 +374,7 @@ func (c *Client) Run() error {
 					"Max retries reached. Backing off for %v...\n",
 					backoffDelay,
 				)
-				utils.Spinner("Reconnecting", backoffDelay)
+				utils.Spinner("Reconnecting ...", backoffDelay)
 			} else {
 				fmt.Printf("Connection failed. Retrying in %v... (attempt %d/%d)\n",
 					c.Config.ReconnectDelay, retryCount, c.Config.MaxRetries)

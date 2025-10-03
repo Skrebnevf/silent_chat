@@ -2,23 +2,21 @@ package utils
 
 import (
 	"crypto/rand"
-	"fmt"
 	"time"
+
+	"github.com/briandowns/spinner"
 )
 
+// Spinner displays an animated spinner with the given message for the specified duration.
+// Uses the briandowns/spinner library for a more professional and feature-rich spinner.
 func Spinner(message string, duration time.Duration) {
-	spinnerChars := []string{"|", "/", "-", "\\"}
-	start := time.Now()
-	for time.Since(start) < duration {
-		for _, char := range spinnerChars {
-			fmt.Printf("\r%s %s", message, char)
-			time.Sleep(100 * time.Millisecond)
-			if time.Since(start) >= duration {
-				break
-			}
-		}
-	}
-	fmt.Printf("\r%s Done\n", message)
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond) // Use dots spinner for better visibility
+	s.Suffix = " " + message
+	s.Start()
+
+	time.Sleep(duration)
+
+	s.Stop()
 }
 
 func RandomString(length int) (string, error) {
