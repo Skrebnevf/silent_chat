@@ -15,6 +15,7 @@ type Config struct {
 	BackoffIncrement      time.Duration // Backoff increment (default 2 seconds)
 	ExpectedFP            string        // Expected certificate fingerprint for verification
 	Addr                  string        // Server address for connection
+	DialTimeout           time.Duration // Timeout for TLS dial (default 15 seconds)
 }
 
 // NewConfig creates a new Config instance with default values.
@@ -29,5 +30,6 @@ func NewConfig() *Config {
 		ReadTimeout:           0,
 		MaxRetries:            5,
 		BackoffIncrement:      2 * time.Second,
+		DialTimeout:           15 * time.Second,
 	}
 }

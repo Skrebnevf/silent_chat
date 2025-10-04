@@ -1,50 +1,22 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"silent_chat/pkg/client"
 	"silent_chat/pkg/config"
 )
 
+const clearScreen = "\033[2J\033[H"
+
 func main() {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Print("\033[2J\033[H")
-
-	asciiArt := `
-  ____ ___ _     _____ _   _ _____    ____ _   _    _  _____ 
- / ___|_ _| |   | ____| \ | |_   _|  / ___| | | |  / \|_   _|
- \___ \| || |   |  _| |  \| | | |   | |   | |_| | / _ \ | |  
-  ___) | || |___| |___| |\  | | |   | |___|  _  |/ ___ \| |  
- |____/___|_____|_____|_| \_| |_|    \____|_| |_/_/   \_\_|  
-                                                                                                                                           
-`
-	fmt.Println(asciiArt)
-
-	fmt.Print("Type host: ")
-	host, _ := reader.ReadString('\n')
-	host = strings.TrimSpace(host)
-
-	fmt.Print("Type port: ")
-	port, _ := reader.ReadString('\n')
-	port = strings.TrimSpace(port)
-
-	if host == "" || port == "" {
-		fmt.Println(
-			"Error: Host and port cannot be empty. Please provide valid values.",
-		)
-		os.Exit(1)
-	}
+	fmt.Print(clearScreen)
 
 	config := config.NewConfig()
-	config.Addr = host + ":" + port
 	config.ExpectedFP = os.Getenv("CHAT_SERVER_FINGERPRINT")
 
 	if config.ExpectedFP == "" {
@@ -58,8 +30,6 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT)
 
 	client := &client.Client{
-		Reader:    reader,
-		Addr:      config.Addr,
 		Config:    config,
 		Connected: false,
 	}

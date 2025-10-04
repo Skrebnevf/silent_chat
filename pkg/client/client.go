@@ -1,9 +1,10 @@
 package client
 
 import (
-	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -14,19 +15,20 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"silent_chat/internal/utils"
 	"silent_chat/pkg/config"
 	"silent_chat/pkg/protocol"
+	"silent_chat/pkg/ui"
 
-	"golang.org/x/term"
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+const clearScreen = "\033[2J\033[H"
 
 type Client struct {
 	Conn        *tls.Conn
-	Reader      *bufio.Reader
 	Addr        string
 	Username    string
 	Config      *config.Config
@@ -118,10 +120,39 @@ func (c *Client) SendFakeMessage() error {
 }
 
 func (c *Client) Connect() error {
+	model := ui.NewAuthModel()
+	p := tea.NewProgram(model)
+	result, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("auth UI error: %v", err)
+	}
+
+	authModel, ok := result.(ui.AuthModel)
+	if !ok {
+		return fmt.Errorf("unexpected model type")
+	}
+
+	authData, err := authModel.GetAuthData()
+	if err != nil {
+		os.Exit(1)
+	}
+
+	c.Addr = authData.Host + ":" + authData.Port
+
+	c.Username = authData.Username
+
+	passwordString := authData.Password
+	passwordBytes := []byte(passwordString)
+
+	hash := sha256.Sum256(passwordBytes)
+	hashedPassword := base64.StdEncoding.EncodeToString(hash[:])
+
 	config := &tls.Config{
 		InsecureSkipVerify: true,
 	}
-	conn, err := tls.Dial("tcp", c.Addr, config)
+
+	dialer := &net.Dialer{Timeout: c.Config.DialTimeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", c.Addr, config)
 	if err != nil {
 		return fmt.Errorf("dial failed: %v", err)
 	}
@@ -135,27 +166,13 @@ func (c *Client) Connect() error {
 
 	fmt.Printf("Connected to %s\n", c.Addr)
 
-	fmt.Print("Enter server password: ")
-	password, err := term.ReadPassword(syscall.Stdin)
-	if err != nil {
-		log.Printf("cannot read password: %v", err)
-		os.Exit(1)
-	}
-	passwordString := string(password)
-
-	fmt.Print("\nEnter your username: ")
-	username, _ := c.Reader.ReadString('\n')
-	username = strings.TrimSpace(username)
-
-	c.Username = username
-
 	c.Conn = conn
 	c.Connected = true
 
 	authMsg := protocol.Message{
 		Type:     "auth",
-		Password: passwordString,
-		Username: username,
+		Password: hashedPassword,
+		Username: c.Username,
 	}
 	if err := c.WriteMessage(authMsg); err != nil {
 		c.Connected = false
@@ -187,10 +204,7 @@ func (c *Client) Connect() error {
 
 	if resp.Type == "auth_result" {
 		if resp.Success {
-			fmt.Printf("Authentication successful. Username: %s\n", username)
-			fmt.Println(
-				"You can now send messages. Type '/quit' or '/q' to exit.",
-			)
+			fmt.Printf("Authentication successful. Username: %s\n", c.Username)
 			return nil
 		}
 		fmt.Printf("Authentication failed: %s\n", resp.Error)
@@ -211,7 +225,7 @@ func (c *Client) Connect() error {
 	return fmt.Errorf("unexpected response from server")
 }
 
-func (c *Client) Listen() {
+func (c *Client) Listen(p *tea.Program) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("Listen goroutine recovered from panic: %v\n", r)
@@ -265,9 +279,7 @@ func (c *Client) Listen() {
 					err.Error(),
 					"use of closed network connection",
 				) {
-				fmt.Println("\nConnection closed by server")
-				c.Connected = false
-				os.Exit(0)
+				p.Quit()
 				return
 			}
 
@@ -277,73 +289,11 @@ func (c *Client) Listen() {
 		}
 
 		if msg.Type == "chat" && msg.Text != "" && msg.SenderName != "" {
-			if msg.SenderIP != "" {
-				fmt.Printf("\r%s: %s\n> ", msg.SenderName, msg.Text)
-			} else {
-				fmt.Printf("\r%s: %s\n> ", msg.SenderName, msg.Text)
-			}
-		}
-	}
-}
-
-func (c *Client) SendLoop() error {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("Send goroutine recovered from panic: %v\n", r)
-		}
-	}()
-
-	for {
-
-		if !c.Connected {
-			return fmt.Errorf("connection lost")
-		}
-
-		c.OutputMutex.Lock()
-		fmt.Print("> ")
-		c.OutputMutex.Unlock()
-		msg, err := c.Reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				fmt.Println("Disconnecting...")
-				return nil
-			}
-			return err
-		}
-
-		msg = strings.TrimSpace(msg)
-		if msg == "" {
-			continue
-		}
-
-		if msg == "/quit" || msg == "/q" {
-			fmt.Println("The Lord loves the patient, and internet privacy")
-			os.Exit(0)
-			return nil
-		}
-
-		if msg == "/kill" {
-			fmt.Println("Sending server shutdown command...")
-			killBytes := []byte("MSGE\x00\x00\x00\x00")
-			if _, err := c.Conn.Write(killBytes); err != nil {
-				fmt.Printf("Failed to send kill command: %v\n", err)
-			}
-			return nil
-		}
-
-		msgData := protocol.Message{
-			Type:       "chat",
-			Text:       msg,
-			SenderName: c.Username,
-		}
-
-		delay := time.Duration(rand.Intn(300)) * time.Millisecond
-		time.Sleep(delay)
-
-		if err := c.WriteMessage(msgData); err != nil {
-			fmt.Printf("Failed to send message: %v\n", err)
-			c.Connected = false
-			return err
+			// Отправляем в UI
+			p.Send(ui.NewChatMsg{
+				Sender: msg.SenderName,
+				Text:   msg.Text,
+			})
 		}
 	}
 }
@@ -352,6 +302,7 @@ func (c *Client) Run() error {
 	retryCount := 0
 
 	for {
+		fmt.Print(clearScreen)
 		err := c.Connect()
 		if err != nil {
 			retryCount++
@@ -385,43 +336,71 @@ func (c *Client) Run() error {
 
 		retryCount = 0
 
-		delay := time.Duration(rand.Intn(30)) * time.Second
+		delay := time.Duration(rand.Intn(30)+1) * time.Second
+
+		stopFake := make(chan struct{})
 
 		go func() {
 			ticker := time.NewTicker(delay)
 			defer ticker.Stop()
 			for {
-				<-ticker.C
-				if c.Connected {
-					if err := c.SendFakeMessage(); err != nil {
-						log.Printf("send fake message, err: %v", err)
+				select {
+				case <-stopFake:
+					return
+				case <-ticker.C:
+					if c.Connected {
+						if err := c.SendFakeMessage(); err != nil {
+							log.Printf("send fake message, err: %v", err)
+						}
 					}
 				}
 			}
 		}()
 
-		var wg sync.WaitGroup
+		chatModel := ui.NewChatModel(c.Username, func(text string) {
+			msgData := protocol.Message{
+				Type:       "chat",
+				Text:       text,
+				SenderName: c.Username,
+			}
 
-		wg.Go(func() {
-			c.Listen()
+			delay := time.Duration(rand.Intn(300)) * time.Millisecond
+			time.Sleep(delay)
+
+			if err := c.WriteMessage(msgData); err != nil {
+				fmt.Printf("Failed to send message: %v\n", err)
+				c.Connected = false
+			}
 		})
 
-		err = c.SendLoop()
+		p := tea.NewProgram(chatModel, tea.WithAltScreen())
 
-		wg.Wait()
+		listenDone := make(chan struct{})
+		go func() {
+			c.Listen(p)
+			close(listenDone)
+		}()
+
+		finalModel, err := p.Run()
+
+		close(stopFake)
 
 		if c.Conn != nil {
-			if closeErr := c.Conn.Close(); closeErr != nil {
-				log.Printf("failed connecting close: %v", closeErr)
-			}
 			c.Connected = false
+			if closeErr := c.Conn.Close(); closeErr != nil {
+				log.Printf("failed to close connection: %v", closeErr)
+			}
 		}
+
+		<-listenDone
 
 		if err == nil {
-			return nil
+			if _, ok := finalModel.(ui.ChatModel); ok {
+				fmt.Println("God loves the patient. Internet respects privacy.")
+				return nil
+			}
 		}
 
-		fmt.Printf("Session ended: %v\n", err)
 		fmt.Printf("Reconnecting in %v...\n", c.Config.ReconnectDelay)
 		utils.Spinner("Reconnecting", c.Config.ReconnectDelay)
 	}
