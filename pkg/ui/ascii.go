@@ -2,7 +2,6 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
-// ASCII арт для приложения
 const silentChatASCII = `
   ____ ___ _     _____ _   _ _____    ____ _   _    _  _____ 
  / ___|_ _| |   | ____| \ | |_   _|  / ___| | | |  / \|_   _|
@@ -11,8 +10,7 @@ const silentChatASCII = `
  |____/___|_____|_____|_| \_| |_|    \____|_| |_/_/   \_\_|  
 `
 
-//const welcomeText = ``
-
+// const welcomeText = “
 func GetASCIIArt() string {
 	style := lipgloss.NewStyle().
 		Foreground(Nord8).

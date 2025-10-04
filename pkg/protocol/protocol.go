@@ -1,3 +1,5 @@
+// Package protocol provides structures and functions for handling chat messages,
+// including TLS certificate verification, fingerprint formatting, and message encoding.
 package protocol
 
 import (
@@ -13,6 +15,8 @@ import (
 	"silent_chat/pkg/config"
 )
 
+// Message represents a protocol message used in the chat application for communication between client and server.
+// It includes fields for message type, content, sender information, authentication, and status.
 type Message struct {
 	Type       string `json:"type"`
 	Text       string `json:"text,omitempty"`
@@ -24,6 +28,9 @@ type Message struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// VerifyFingerprint verifies the TLS certificate fingerprint against an expected value to ensure secure connection.
+// It performs a handshake, extracts the server's certificate, computes its SHA256 fingerprint, and compares it with the expected one.
+// If expectedFP is empty, it warns and allows insecure connection for development purposes.
 func VerifyFingerprint(conn *tls.Conn, expectedFP string) error {
 	if err := conn.Handshake(); err != nil {
 		return fmt.Errorf("TLS handshake failed: %v", err)
@@ -55,6 +62,8 @@ func VerifyFingerprint(conn *tls.Conn, expectedFP string) error {
 	return fmt.Errorf("fingerprint mismatch")
 }
 
+// FormatFingerprint formats a hexadecimal fingerprint string into a colon-separated format for better readability.
+// It groups the hex string into pairs separated by colons (e.g., "aabbccdd" becomes "aa:bb:cc:dd").
 func FormatFingerprint(fp string) string {
 	var result []string
 	for i := 0; i < len(fp); i += 2 {
@@ -65,6 +74,9 @@ func FormatFingerprint(fp string) string {
 	return strings.Join(result, ":")
 }
 
+// EncodeMessage encodes a Message struct into a JSON byte array with a 4-byte length prefix for network transmission.
+// It marshals the message to JSON, checks size limits from config, and prepends the length as a big-endian uint32.
+// Returns an error if the message exceeds MaxPacketSize or other encoding issues occur.
 func EncodeMessage(msg Message, config *config.Config) ([]byte, error) {
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
