@@ -289,7 +289,6 @@ func (c *Client) Listen(p *tea.Program) {
 		}
 
 		if msg.Type == "chat" && msg.Text != "" && msg.SenderName != "" {
-			// Отправляем в UI
 			p.Send(ui.NewChatMsg{
 				Sender: msg.SenderName,
 				Text:   msg.Text,
