@@ -41,7 +41,7 @@ The client will connect to the server, authenticate, and open the chat interface
 
 ## Server
 
-This client connects to the server available at: [https://github.com/Skrebnevf/elixir-shc](https://github.com/Skrebnevf/elixir-shc)
+This client connects to the server available at: [https://github.com/Skrebnevf/silent_chat_server](https://github.com/Skrebnevf/silent_chat_server)
 
 ## Requirements
 
